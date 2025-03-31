@@ -1,0 +1,226 @@
+/* Global Formats */
+.container-fluid {
+  font-family: Arial;
+}
+
+.main-container {
+  font-family: Arial;
+}
+
+/* general typography */
+.leaflet-container {
+  font-family:Arial;
+	}
+.leaflet .info {
+  font-family:Arial;
+}
+
+/* title styles */
+h1 {
+  font-family: Arial;
+}
+
+h2 {
+  font-family: Arial;
+
+}
+
+h3 {
+  font-family: Arial;
+
+}
+h4 {
+  font: 400 24px/30px  Arial, sans-serif;
+    font-style: normal;
+    font-variant-ligatures: normal;
+    font-variant-caps: normal;
+    font-variant-numeric: normal;
+    font-variant-east-asian: normal;
+    font-weight: 400;
+    font-stretch: normal;
+    font-size: 24px;
+    line-height: 30px;
+    font-family:  Arial;
+}
+
+
+/* image styles */
+img {
+  padding: 0px 0 0px 0;
+}
+
+
+
+/* paragraph styles */
+p {
+  font-size: 18px;
+  margin: 0 0 8px 0;
+  font-family: Arial;
+
+}
+
+.callout-caption-container {
+  font-size: 18px;
+  font-family: Arial;
+}
+
+/* list styles */
+li {
+  font-size: 16px;
+  font-family: Arial;
+}
+
+
+/* link styles */
+.a {
+  color: #001864;
+}
+
+/* Header image formatting */
+/*#header {
+  padding-top: 12px;
+}/*
+
+/* Legend Formatting */
+.list-group-item.active {
+  background-color: #001864;
+  border-color: #001864;
+}
+
+.list-group-item.active:hover {
+  background-color: #000000;
+  border-color: #000000;
+}
+
+.tocify {
+  border-radius: 0;
+}
+
+/* Button Formatting */
+.btn {
+  border-radius: 0;
+}
+
+/* special styles */
+#date {
+  text-align: center;
+    font: italic 14px Arial;
+    color: #666;
+    margin-bottom: 2em;
+    margin-top: 2em;
+}
+
+@media print{
+    /* remove elements */
+    #TOC, #toc, #header-pinned{
+        display: none;
+    }
+    .nav-tabs{
+        display: none;
+    }
+    .exclude{
+        display: none;
+    }
+    .contentBlock.title{
+        padding-top: 0px;
+    }
+    .expandContainer{
+        height: fit-content !important;
+        height: -moz-fit-content;
+    }
+    .expandFull{
+        display: block !important;
+    }
+  @page {
+    size: 210mm 297mm; /* portrait
+    /* you can also specify margins here: */
+    margin: 15mm;
+   /*margin-right: 45mm;  for compatibility with both A4 and Letter */
+  }
+  /* page breaks */
+  .printbreak {
+    page-break-before: always;
+  }
+  .avoidpagebreak {
+    break-inside: avoid-page;
+  }
+}
+
+.p2 {
+  font-size: 14px;
+  margin: 0 0 8px 0;
+}
+
+.panel-tabset .nav-item {
+  font-size: 20px;
+  font-style: normal
+}
+
+.panel-tabset .tab-content {
+  border: none;
+  padding: 10px 0px 10px 0px; !important
+
+}
+
+
+/* Nav pills */
+/* not active */
+.nav-pills .nav-link:not(.active) {
+    background-color: white;
+    color: #001864;
+    padding: 5px 10px 5px 10px;
+}
+
+/* active (faded) */
+.nav-pills .nav-link.active {
+    background-color: #001864;
+    color: white;
+    padding: 5px 10px 5px 10px;
+}
+
+.nav-tabs {
+  border-bottom: 0px; !important
+  border-left: 0px; !important
+}
+
+.table.gt_table{
+    margin-bottom: 0px;
+}
+
+.gt_table{
+    margin-bottom: 0px;
+}
+
+
+/* // scss-docs-start color-variables
+$blue:    #0d6efd !default;
+$indigo:  #6610f2 !default;
+$purple:  #6f42c1 !default;
+$pink:    #d63384 !default;
+$red:     #dc3545 !default;
+$orange:  #fd7e14 !default;
+$yellow:  #ffc107 !default;
+$green:   #198754 !default;
+$teal:    #20c997 !default;
+$cyan:    #0dcaf0 !default;
+// scss-docs-end color-variables
+
+// scss-docs-start colors-map
+$colors: (
+  "blue":       $blue,
+  "indigo":     $indigo,
+  "purple":     $purple,
+  "pink":       $pink,
+  "red":        $red,
+  "orange":     $orange,
+  "yellow":     $yellow,
+  "green":      $green,
+  "teal":       $teal,
+  "cyan":       $cyan,
+  "black":      $black,
+  "white":      $white,
+  "gray":       $gray-600,
+  "gray-dark":  $gray-800
+) !default;
+// scss-docs-end colors-map */
+

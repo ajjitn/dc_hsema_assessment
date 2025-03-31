@@ -1,0 +1,905 @@
+---
+title: "Extreme Flooding Notice"
+format:
+  html:
+    embed-resources: false
+    page-layout: full
+    css: www/web_report.css
+    toc: true
+    toc-depth: 2
+    standalone: false
+    header-includes: |
+      <link href='https://fonts.googleapis.com/css?family=Poppins' rel='stylesheet'>
+editor_options:
+  chunk_output_type: console
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: false
+params:
+  affected_zips: "20001,20002,20011,20017,20018,20036,20064,20422"
+---
+
+
+```{r}
+#| label: Read in and Setup
+#| warning: false
+#| message: false
+
+library(tidyverse)
+library(sf)
+library(janitor)
+library(fontawesome)
+library(tidycensus)
+library(mapview)
+library(RColorBrewer)
+library(leaflet.extras2)
+library(leaflet.extras)
+library(geoarrow)
+library(arrow)
+library(here)
+library(sf)
+library(leaflet)
+library(leaflet.providers)
+library(readxl)
+library(gt)
+library(gtExtras)
+library(leafpop)
+library(fmsb)
+library(colorspace)
+library(htmltools)
+library(testthat)
+library(leaflegend)
+library(glue)
+ 
+# ---- Read in ------
+dc_zips = open_dataset(here("data/raw-data/dc_zips.parquet")) %>% st_as_sf()
+all_point_data = open_dataset(here("data/raw-data/all_point_data.parquet")) %>% 
+  st_as_sf() %>% 
+  clean_names()
+dc_boundary_line = open_dataset(here("data/raw-data/dc_boundary.parquet")) %>% st_as_sf()
+dc_metro_lines = open_dataset(here("data/raw-data/dc_metro_lines.parquet")) %>% st_as_sf()
+dc_bus_lines = open_dataset(here("data/raw-data/dc_bus_lines.parquet")) %>% st_as_sf(crs = "EPSG:4326")
+
+
+dc_svi_filtered = open_dataset(here("data/raw-data/dc_svi.parquet")) %>% st_as_sf()
+
+# affected_areas = st_read(here("data/raw-data/affected_zips.geojson"), quiet =T)
+# affected_areas_filled = st_read(here("data/raw-data/affected_zips_filled.geojson"), quiet =T)
+# 
+# 
+# filtered_point_data = all_point_data %>% 
+#   st_join(affected_areas_filled, left = FALSE)
+
+# ---  Zip code filtering ----
+selected_zips = str_split_1(params$affected_zips, ",")
+
+affected_areas = dc_zips %>%
+  filter(ZIPCODE %in% selected_zips) %>%
+  st_union() %>%
+  st_make_valid() %>% 
+  st_as_sf() %>% 
+  rename(geometry = x) %>% 
+  st_as_sf()
+
+affected_areas_filled = affected_areas %>%
+  nngeo::st_remove_holes() %>%
+  st_make_valid()
+
+filtered_point_data = all_point_data %>% 
+  st_join(affected_areas_filled, left = FALSE)
+
+bbox_of_affected_areas_filled = st_as_sf(st_as_sfc(st_bbox(affected_areas_filled)))
+
+filtered_dc_metro_lines = dc_metro_lines %>% 
+  st_intersection(bbox_of_affected_areas_filled)
+
+filtered_dc_bus_lines = dc_bus_lines %>% 
+  st_intersection(bbox_of_affected_areas_filled)
+
+# ---- Set mapview options ----
+mapviewOptions(
+  basemaps = c("CartoDB.Positron"),
+  na.color = "gray50",
+  # To match default alpha of mapview polygon fills
+  legend.opacity = 0.7,
+  fgb = TRUE,
+  homebutton = FALSE
+)
+
+#Shortcut for house icon, uses fontawesome package -----
+create_house_icon <- function(color){
+  leaflet::makeAwesomeIcon(
+    icon = "building",
+    iconColor = "black",
+    library = "fa",
+    markerColor = color
+    )
+  }
+
+# Using leaflet.extras2 default addresetmapbutton fxn was failing across tabs. See
+# this issue here: https://github.com/rstudio/leaflet/issues/623. This was
+# proposed fix. It was supposedly fixed in leaflet.extras2, but we still ran into
+# the same issue described on Github. So we explicitly use this function to
+# add reset buttons.
+addMyResetMapButton <- function(leaf) {
+  leaf %>%
+    addEasyButton(
+      easyButton(
+        icon = "fa-refresh",
+        title = "Reset View",
+        onClick = JS(
+          "function(btn, map){ map.setView(map._initialCenter, map._initialZoom); }"
+        )
+      )
+    ) %>%
+    htmlwidgets::onRender(
+      JS(
+"
+function(el, x){
+  var map = this;
+  map.whenReady(function(){
+    map._initialCenter = map.getCenter();
+    map._initialZoom = map.getZoom();
+  });
+}"
+      )
+    )
+}
+
+add_dc_boundary = function(mapview_map){
+  mapview_map +
+  mapview(dc_boundary_line, 
+          color = "black", 
+          lwd = 3, 
+          layer.name = "DC Boundary",
+          legend = FALSE)
+}
+
+
+# removeMouseCoordinates = function(map) {
+# 
+#   rc = map$jsHooks$render
+#   rc_lnlt = lapply(rc, grep, pattern = "lnlt")
+#   for (i in seq_along(map$jsHooks$render)) {
+#     map$jsHooks$render[[i]][rc_lnlt[[i]]] = NULL
+#   }
+#   return(map)
+# }
+
+add_map_customization = function(mapview_map, layer_names){
+  
+  x = mapview_map %>% 
+    add_dc_boundary
+  
+  x@map %>% 
+    addMyResetMapButton() %>% 
+    addLayersControl(
+        # baseGroups = c("CartoDB.Positron", "CartoDB.Darkmatter"),
+        overlayGroups = c(layer_names, "DC Boundary"),
+        options = layersControlOptions(collapsed = TRUE),
+        position = "topleft"
+    )
+}
+
+
+# ---- Define helper table fxns -----
+create_gt_table = function(df){
+  df %>%
+    gt() %>%
+    gt_theme_538() %>% 
+    tab_options(
+      container.padding.x = px(0),
+      container.padding.y = px(0),
+      table.align = "left",
+      table.font.size = "16px",
+    ) %>%
+    tab_style(
+          style = "padding-left:40px",
+          locations = cells_column_labels(columns = c(-1))
+          ) %>%
+    opt_table_font(
+      font = "Arial"
+    ) %>% 
+    opt_interactive(
+      active = TRUE,
+      use_pagination = TRUE,
+      use_pagination_info = TRUE,
+      use_sorting = TRUE,
+      use_search = TRUE,
+      use_filters = FALSE,
+      use_resizers = TRUE,
+      use_highlight = TRUE,
+      use_compact_mode = TRUE,
+      use_text_wrapping = TRUE,
+      use_page_size_select = TRUE,
+      page_size_default = 5,
+      page_size_values = c(5,10,25),
+      pagination_type = c("numbers"),
+      height = "auto"
+    )
+
+}
+```
+
+::: {.callout-important collapse="false"}
+## What we know so far:
+On June 8, 2024 at 2 AM, multiple catastrophic water main breaks occurred in the northern 2 quadrants of the District. The following DC zipcodes are currently experiencing extreme flooding:
+
+```{r}
+#| label: generate html list of zips
+
+
+zips_vec = paste0("<li>", selected_zips, "</li>")
+list_of_zips_for_quarto <- c("<ul>", zips_vec ,"</ul>")
+html_list_of_zips_for_quarto <- paste0(list_of_zips_for_quarto, collapse="")
+
+```
+
+
+`r html_list_of_zips_for_quarto`
+
+<!-- - 20001 -->
+<!-- - 20002 -->
+<!-- - 20011 -->
+<!-- - 20017 -->
+<!-- - 20018 -->
+<!-- - 20036 -->
+<!-- - 20064 -->
+<!-- - 20422 -->
+
+Many critical government facilities, such as schools, transportation, recreation facilities, healthcare facilities, and fire/police stations will likely be closed. View the affected infrastructure below or by scrolling to the relevant section in the Table of Contents all the way to the right.
+:::
+
+# Affected Areas
+
+```{r}
+aff_area_map = mapview(affected_areas_filled %>% 
+          mutate(name = "Flooding Zone"), 
+        col.regions = "steelblue", 
+        layer.name = "Flooding Zone",
+        label = "name") 
+
+
+aff_area_map %>% 
+  add_map_customization(layer_names = "Flooding Zone")
+
+```
+<br>
+Severe flooding is expected in the neighborhoods of Dupont, Edgewood, Bloomingdale, Truxton Circle, Eckington, Brookland, Brentwood, Woodridge, Queens Chapel, Michigan Park, and North Michigan Park. View the flooding area above and toggle layers on/off using the layers button on the top right.
+
+# Affected Schools
+
+::: {.panel-tabset .nav-pills}
+
+## Map
+
+Click on a school below for more information
+
+```{r}
+education_data = filtered_point_data %>% 
+  filter(type == "Education") %>% 
+  select(name, address, grades, web_url, phone, subtype)
+
+education_map = mapview(education_data, 
+        col.regions = "#293F14",
+        layer.name = "Schools",
+        label = "name",
+        cex = 3.5,
+        popup = popupTable(education_data, 
+                           zcol = c("name", "subtype", "address", "grades", "web_url", "phone"),
+                           feature.id = FALSE, row.numbers = FALSE),
+        # zcol = "subtype",
+        stroke = FALSE)
+
+
+education_affected_map = aff_area_map + education_map
+
+education_affected_map %>% 
+  add_map_customization(layer_names = c("Flooding Zone", "Schools"))
+
+```
+
+
+## Map (Subtype)
+
+Click on a school below for more information
+
+```{r}
+charters = education_data %>% 
+                    select(name, address, grades, phone, web_url, subtype) %>% 
+                    filter(subtype == "Charter Schools")
+
+publics = education_data %>% 
+                    select(name, address, grades, phone, web_url, subtype) %>% 
+                    filter(subtype == "Public Schools")
+
+independents = education_data %>% 
+                    select(name, address, grades, phone, web_url, subtype) %>% 
+                    filter(subtype == "Independent Schools")
+
+charter_map = mapview(charters, 
+        label = "name",
+        layer.name = "Charter Schools",
+        popup = popupTable(charters, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#DC3545"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+public_map = mapview(publics, 
+        label = "name",
+        layer.name = "Public Schools",
+        popup = popupTable(publics, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#9FD356"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+ind_map = mapview(independents, 
+        label = "name",
+        layer.name = "Independent Schools",
+        popup = popupTable(independents, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#FCAB10"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+education_affected_map_by_subtype = aff_area_map + charter_map + public_map + ind_map
+
+education_affected_map_by_subtype %>% 
+  add_map_customization(layer_names = c("Flooding Zone", "Charter Schools", "Independent Schools", "Public Schools"))
+
+```
+
+
+## Table
+
+Search for specific schools in the table below
+
+```{r}
+
+education_data %>% 
+  select(`School Name` = name,
+         `School Type` = subtype,
+         Address = address,
+         Phone = phone,
+         Grades = grades,
+         `Web URL` = web_url,
+         Address = address) %>% 
+  st_drop_geometry() %>% 
+  create_gt_table() 
+```
+
+:::
+
+::: {.callout-note collapse="false"}
+Check the websites of individual schools or call them for up to date information.
+:::
+
+
+
+# Affected Metro Stations
+
+::: {.callout-note collapse="false"}
+Check the WMATA [alert page](https://www.wmata.com/service/status/) or [Twitter feed](https://x.com/Metrorailinfo) for more up to date information
+:::
+
+::: {.panel-tabset .nav-pills}
+
+## Map
+
+```{r}
+#| label: metro affected station map
+
+filtered_dc_metro_lines_manual = filtered_dc_metro_lines %>% 
+  filter(NAME != "silver") %>%
+  filter(NAME != "orange") %>%
+  filter(NAME != "blue") 
+
+metro_station_points = filtered_point_data %>% 
+  filter(type == "Transportation") %>% 
+  select(name, line, subtype, address) %>% 
+  filter(subtype == "Metro Stations")
+
+manual_station_points = tribble(~name, ~address, ~type, ~subtype, ~line, ~geometry,
+                        "Gallery Pl-Chinatown", "630 H STREET NW", "Transportation", "Metro Stations", "red", "POINT(-77.02192 38.89832)",
+                        "Gallery Pl-Chinatown", "630 H STREET NW", "Transportation", "Metro Stations", "yellow", "POINT(-77.02192 38.89872)",
+                        "Gallery Pl-Chinatown", "630 H STREET NW", "Transportation", "Metro Stations", "green", "POINT(-77.02192 38.89792)",
+                        "Mt Vernon Sq - 7th St Convention Center", "700 M STREET NW", "Transportation", "Metro Stations", "green", "POINT(-77.02192 38.90644)",
+                        "Mt Vernon Sq - 7th St Convention Center", "700 M STREET NW", "Transportation", "Metro Stations", "yellow", "POINT(-77.02192 38.90684)",
+                        "Fort Totten", "550 GALLOWAY STREET NE", "Transportation", "Metro Stations", "red", "POINT(-77.00221 38.95185)",
+                        "Fort Totten", "550 GALLOWAY STREET NE", "Transportation", "Metro Stations", "green", "POINT(-77.00221 38.95145)",
+                        ) %>% 
+  st_as_sf(wkt = "geometry", crs ="EPSG:4326")
+
+
+metro_station_points_adjusted = metro_station_points %>% 
+  filter(subtype == "Metro Stations") %>% 
+  filter(!str_detect(line, ",")) %>% 
+  bind_rows(manual_station_points) %>% 
+  mutate(line = str_to_title(line))
+  
+station_map = mapview(metro_station_points_adjusted, 
+        zcol = "line",
+        layer.name = "Metro Stations",
+        label = "name",
+        alpha.regions = 0.9,
+        popup = popupTable(metro_station_points_adjusted, zcol = c("name", "line","address"),
+                           feature.id = FALSE, row.numbers = FALSE),
+        col.regions = c("#00B140", "#BF0D3E", "#FFD100"),
+        stroke = FALSE) 
+
+
+lines_map = mapview(filtered_dc_metro_lines_manual,
+                    color  = c("#BF0D3E", "#00B140", "#FFD100"),
+                    popup = FALSE,
+                    layer.name = "Metro Routes",
+                    legend = FALSE)
+
+combined_metro_map = lines_map + station_map
+
+metro_stations_affected_map = aff_area_map + combined_metro_map
+
+metro_stations_affected_map %>% 
+  add_map_customization(layer_names = c("Flooding Zone", "Metro Stations"))
+```
+
+## Table
+
+Search for specific stations in the table below
+
+```{r}
+#| label: metro stations table
+metro_station_points %>% 
+  mutate(line = str_to_title(line)) %>% 
+  st_drop_geometry() %>% 
+  select(Name = name, Line = line, Address = address) %>% 
+  create_gt_table()
+```
+
+
+:::
+
+# Affected Bus Stations
+ 
+::: {.callout-note collapse="false"}
+Check the WMATA [alert page](https://www.wmata.com/service/status/) or [Twitter feed](https://x.com/Metrobusinfo) for more up to date information
+:::
+::: {.panel-tabset .nav-pills}
+
+## Map
+
+```{r}
+
+bus_station_points = filtered_point_data %>% 
+  filter(type == "Transportation") %>% 
+  select(name, line, subtype, address, bstp_msg_text) %>% 
+  filter(subtype == "Bus Stations") %>% 
+  mutate(name = bstp_msg_text) %>% 
+  select(-bstp_msg_text)
+
+
+bus_station_map = mapview(bus_station_points, 
+        col.regions = "black",
+        layer.name = "Bus Stations",
+        popup = popupTable(bus_station_points,
+                           c("name", "subtype"),
+                           feature.id = F,
+                           row.numbers = F),
+        label = "name",
+        cex = 3,
+        alpha.regions = 0.3,
+        stroke = FALSE) 
+
+bus_route_map = mapview(filtered_dc_bus_lines %>% st_cast("MULTILINESTRING"),
+                        color = "red",
+                        label = "ROUTE", 
+                        layer.name = "Bus Routes",
+                        popup = FALSE,
+                        alpha = 0.03)
+
+
+
+bus_stations_affected_map = aff_area_map + bus_station_map + bus_route_map
+
+bus_stations_affected_map %>% 
+  add_map_customization(layer_names = c("Flooding Zone", "Bus Stations", "Bus Routes"))
+
+```
+
+## Table
+
+Search for specific bus stops in the below table:
+
+```{r}
+bus_station_points %>% 
+  st_drop_geometry() %>% 
+  select(Name = name, subtype = subtype) %>% 
+  create_gt_table()
+```
+
+:::
+
+
+# Affected Recreation Facilities 
+
+::: {.callout-note collapse="false"}
+Check the DC [DPR Alert page](https://dpr.dc.gov/dpralerts) for more up to date information.
+:::
+
+::: {.panel-tabset .nav-pills}
+
+## Map
+
+```{r}
+rec_facilities = filtered_point_data %>% 
+  filter(type == "Recreation Facilities") %>% 
+  select(name, address, phone, subtype, type)
+
+rec_map = mapview(rec_facilities, 
+        col.regions = "#9FD356",
+        layer.name = "Recreation Facilities",
+        popup = popupTable(rec_facilities,
+                           c("name", "address", "phone", "subtype"),
+                           feature.id = F,
+                           row.numbers = F),
+        label = "name",
+        cex = 4,
+        stroke = FALSE) 
+
+rec_affected_map = aff_area_map + rec_map
+
+rec_affected_map %>% 
+  add_map_customization(layer_names = c("Flooding Zone", "Recreation Facilities"))
+
+```
+
+## Map (Subtype)
+
+```{r}
+aquatics = rec_facilities %>% 
+                    select(name, address, phone, subtype) %>% 
+                    filter(subtype == "Aquatic Center" | subtype == "Pools")
+
+recs = rec_facilities %>% 
+                    select(name, address, phone, subtype) %>% 
+                    filter(subtype == "Rec. Center")
+
+seniors = rec_facilities %>% 
+                    select(name, address, phone, subtype) %>% 
+                    filter(subtype == "Senior Center")
+
+spray_parks = rec_facilities %>% 
+                    select(name, address, phone, subtype) %>% 
+                    filter(subtype == "Spray Park")
+
+aquatics_map = mapview(aquatics, 
+        label = "name",
+        layer.name = "Pools/Aquatic Centers",
+        popup = popupTable(aquatics, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#DC3545"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+recs_map = mapview(recs, 
+        label = "name",
+        layer.name = "Rec. Centers",
+        popup = popupTable(recs, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#9FD356"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+seniors_map = mapview(seniors, 
+        label = "name",
+        layer.name = "Senior Centers",
+        popup = popupTable(seniors, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#FCAB10"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+spray_park_map = mapview(spray_parks, 
+        label = "name",
+        layer.name = "Spray Parks",
+        popup = popupTable(spray_parks, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#293F14"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+education_affected_map_by_subtype = aff_area_map + aquatics_map + recs_map + seniors_map + spray_park_map
+
+education_affected_map_by_subtype %>% 
+  add_map_customization(layer_names = c("Flooding Zone", "Pools/Aquatic Centers", "Rec. Centers", "Senior Centers", "Spray Parks"))
+
+```
+
+## Table
+
+Search forspecific recreational facilities in the table below
+
+```{r}
+rec_facilities %>% 
+  st_drop_geometry() %>% 
+  select(Name = name, Phone = phone, Address = address, Subtype = subtype) %>% 
+  create_gt_table()
+```
+
+:::
+
+
+
+# Affected Healthcare Facilities 
+
+::: {.panel-tabset .nav-pills}
+## Map
+
+```{r}
+health_facilities = filtered_point_data %>% 
+  filter(type == "Healthcare Facilities") %>% 
+  select(name, address, phone, subtype,facility_type= facilility_type, facility_setting)
+
+health_map = mapview(health_facilities, 
+        col.regions = "#DC3545",
+        layer.name = "Healthcare Facilities",
+        popup = popupTable(health_facilities,
+                           c("name","subtype", "address", "phone", "facility_type"),
+                           feature.id = F,
+                           row.numbers = F),
+        label = "name",
+        cex = 4,
+        stroke = FALSE) 
+
+health_affected_map = aff_area_map + health_map
+
+health_affected_map %>% 
+  add_map_customization(layer_names = c("Flooding Zone", "Healthcare Facilities"))
+
+```
+
+## Map (Subtype)
+
+```{r}
+dialsyis_clinics = health_facilities %>% 
+                    select(name, address, phone, subtype, facility_type) %>% 
+                    filter(subtype == "Dialysis Clinics")
+
+hospitals = health_facilities %>% 
+                    select(name, address, phone, subtype, facility_type) %>% 
+                    filter(subtype == "Hospitals")
+
+intermediate_care_centers = health_facilities %>% 
+                    select(name, address, phone, subtype, facility_type) %>% 
+                    filter(subtype == "Intermediate Care")
+
+nursing_homes = health_facilities %>% 
+                    select(name, address, phone, subtype, facility_type) %>% 
+                    filter(subtype == "Nursing Homes")
+
+primary_care_centers = health_facilities %>% 
+                    select(name, address, phone, subtype, facility_type) %>% 
+                    filter(subtype == "Primary Care Centers")
+
+dialysis_map = mapview(dialsyis_clinics, 
+        label = "name",
+        layer.name = "Dialysis Clinics",
+        popup = popupTable(dialsyis_clinics, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#DC3545"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+hospitals_map = mapview(hospitals, 
+        label = "name",
+        layer.name = "Hospitals",
+        popup = popupTable(hospitals, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#9FD356"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+primary_map = mapview(primary_care_centers, 
+        label = "name",
+        layer.name = "Primary Care Centers",
+        popup = popupTable(primary_care_centers, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#293F14"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+intermediate_map = mapview(intermediate_care_centers, 
+        label = "name",
+        layer.name = "Intermediate Care Centers",
+        popup = popupTable(intermediate_care_centers, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#001864"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+nursing_maps = mapview(nursing_homes, 
+        label = "name",
+        layer.name = "Nursing Homes",
+        popup = popupTable(nursing_homes, row.numbers = F, feature.id = F),
+        cex = 3.5,
+        col.regions = c("#FCAB10"),
+        alpha.regions = 0.7,
+        stroke = FALSE)
+
+health_affected_map_by_subtype = aff_area_map + nursing_maps + intermediate_map + primary_map + hospitals_map + dialysis_map
+
+health_affected_map_by_subtype %>% 
+  add_map_customization(layer_names = c("Flooding Zone", "Dialyis Clinics", "Hospitals", "Primary Care Centers", "Intermediate Care Centers", "Nursing Homes"))
+
+```
+
+## Table
+
+Search for specific health facilities in the table below
+
+```{r}
+health_facilities %>% 
+  st_drop_geometry() %>% 
+  select(Name = name, Subtype = subtype, Phone = phone, Address = address, `Facility Type` = facility_type) %>% 
+  create_gt_table()
+```
+
+:::
+
+# Affected Fire/Police Stations 
+
+::: {.panel-tabset .nav-pills}
+## Map
+
+```{r}
+#| label: gov facilitiy map
+
+gov_facilities = filtered_point_data %>% 
+  filter(type == "Gov. Facilities") %>% 
+  select(name, address, phone, subtype) %>% 
+  # Remove two duplicate rows, which have same point
+  filter(name != "DC FEMS Human Resources") %>% 
+  filter(name != "Fire Prevention")
+
+gov_map = mapview(gov_facilities, 
+        col.regions = "#FCAB10",
+        layer.name = "Fire/Police Stations",
+        popup = popupTable(gov_facilities,
+                           c("name","subtype", "address", "phone"),
+                           feature.id = F,
+                           row.numbers = F),
+        label = "name",
+        cex = 4,
+        stroke = FALSE) 
+
+gov_affected_map = aff_area_map + gov_map
+
+gov_affected_map %>% 
+  add_map_customization(layer_names = c("Flooding Zone", "Fire/Police Stations"))
+
+```
+
+## Table
+
+Search for specific fire/police stations in the table below
+
+```{r}
+#| label: gov facilitiy table
+gov_facilities %>% 
+  st_drop_geometry() %>% 
+  select(Name = name, Subtype = subtype, Phone = phone, Address = address) %>% 
+  create_gt_table()
+```
+
+:::
+
+# Socially Vulnerable Neighborhoods
+
+The CDC created a Social Vulnerability Index to rank communities that are more vulnerable to the impacts of disasters (like flooding). It uses social, economic, and environmental factors to assess how well specific neighborhoods can respond to and recover from crises. Higher % Ranks (ie redder areas) indicate neighborhoods that are more vulnerable to disasters and may need more support. 
+
+```{r}
+#| label: svi
+reds = colorRampPalette(c('#FCAB10', "white", '#dc3545'))
+
+dc_svi_filtered = dc_svi_filtered %>% 
+  tidylog::mutate(across(where(is.numeric), ~ifelse(. == -999, NA, .)))
+
+dc_svi_map = dc_svi_filtered %>% 
+  mapview(zcol = "overall_rank",
+          layer.name = "Social Vulnerability % Rank",
+          na.color = "grey60",
+          popup = popupTable(dc_svi_filtered, 
+                             c("census_tract","E_TOTPOP", "overall_rank", 
+                               "socioeconomic_status_rank", 
+                               "household_chrtrstcs_rank",
+                               "racial_ethnic_minority_rank",
+                               "housing_transpo_rank"
+                               ),
+                             row.numbers = F,
+                             feature.id = F,
+                             ),
+          col.regions = reds,
+          at = seq(0,1, 0.1))
+
+
+svi_map = aff_area_map + dc_svi_map
+
+svi_map %>%  add_map_customization(c("Flooding Zone", "Social Vulnerability % Rank")) 
+
+```
+
+
+# All Affected Services 
+
+Only check one or two layers at a time
+
+```{r}
+
+gov_map = mapview(gov_facilities, 
+        col.regions = "#FCAB10",
+        layer.name = "Fire/Police Stations",
+        popup = popupTable(gov_facilities,
+                           c("name","subtype", "address", "phone"),
+                           feature.id = F,
+                           row.numbers = F),
+        label = "name",
+        cex = 4,
+        stroke = FALSE) 
+
+
+health_map = mapview(health_facilities, 
+        col.regions = "#DC3545",
+        layer.name = "Healthcare Facilities",
+        popup = popupTable(health_facilities,
+                           c("name","subtype", "address", "phone", "facility_type"),
+                           feature.id = F,
+                           row.numbers = F),
+        label = "name",
+        cex = 4,
+        stroke = FALSE) 
+
+education_map = mapview(education_data, 
+        col.regions = "#293F14",
+        layer.name = "Schools",
+        label = "name",
+        cex = 3.5,
+        popup = popupTable(education_data, 
+                           zcol = c("name", "subtype", "address", "grades", "web_url", "phone"),
+                           feature.id = FALSE, row.numbers = FALSE),
+        # zcol = "subtype",
+        stroke = FALSE)
+
+
+rec_map = mapview(rec_facilities, 
+        col.regions = "#9FD356",
+        layer.name = "Recreation Facilities",
+        popup = popupTable(rec_facilities,
+                           c("name", "address", "phone", "subtype"),
+                           feature.id = F,
+                           row.numbers = F),
+        label = "name",
+        cex = 4,
+        stroke = FALSE) 
+
+
+all_layer_names = c("Flooding Zone", "Schools" ,"Fire/Police Stations", "Recreation Facilities", "Healthcare Facilities", "Metro Stations", "Metro Routes", "Social Vulnerability % Rank")
+
+combined_map = aff_area_map + 
+  gov_affected_map + health_affected_map + 
+  rec_map + education_map +
+  combined_metro_map + dc_svi_map
+combined_map %>% 
+    add_map_customization(all_layer_names) %>% 
+    hideGroup(c("Fire/Police Stations", "Recreation Facilities", "Healthcare Facilities", "Schools", "Social Vulnerability % Rank")) %>% 
+   addLayersControl(
+      # baseGroups = c("CartoDB.Positron", "CartoDB.Darkmatter"),
+      overlayGroups = all_layer_names,
+      options = layersControlOptions(collapsed = FALSE),
+      position = "topleft"
+    ) 
+
+```
+
