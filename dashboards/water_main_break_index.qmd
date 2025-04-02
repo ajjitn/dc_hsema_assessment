@@ -920,7 +920,8 @@ combined_map %>%
 #| label: table of all data
 filtered_data_for_table = filtered_point_data %>% 
 select(Name = name, Type = type, Subtype = subtype, Address = address,
-     `Web URL` = web_url, Phone = phone, Grades = grades, facility_type = facilility_type)
+     `Web URL` = web_url, Phone = phone, Grades = grades, facility_type = facilility_type) %>% 
+  st_drop_geometry()
 
 filtered_data_for_table %>% 
   create_gt_table() %>% 
