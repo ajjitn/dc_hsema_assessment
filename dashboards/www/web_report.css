@@ -192,6 +192,15 @@ li {
 }
 
 
+.quarto-title-block .quarto-title-banner {
+  background-image: url(images/hsema_logo.png);
+  background-size: 200px;
+  background-position: left;
+  background-repeat: no-repeat;
+  padding-left: 10px;
+  background-origin: content-box;
+}
+
 /* // scss-docs-start color-variables
 $blue:    #0d6efd !default;
 $indigo:  #6610f2 !default;

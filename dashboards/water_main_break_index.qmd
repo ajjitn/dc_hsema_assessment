@@ -1,5 +1,6 @@
 ---
 title: "Extreme Flooding Notice"
+title-block-banner: "#dc3545"
 format:
   html:
     embed-resources: false
@@ -18,7 +19,7 @@ execute:
   message: false
   cache: false
 params:
-  affected_zips: "20001,20002,20011,20017,20018,20036,20064,20422"
+  affected_zips: "20001,20002,20011,20017,20018,20036,20037,20064,20422"
 ---
 
 
@@ -52,6 +53,7 @@ library(htmltools)
 library(testthat)
 library(leaflegend)
 library(glue)
+library(downloadthis)
  
 # ---- Read in ------
 dc_zips = open_dataset(here("data/raw-data/dc_zips.parquet")) %>% st_as_sf()
@@ -194,6 +196,12 @@ create_gt_table = function(df){
       container.padding.y = px(0),
       table.align = "left",
       table.font.size = "16px",
+      footnotes.border.bottom.color = "white",
+      footnotes.border.lr.color = "white",
+      source_notes.border.bottom.color = "white",
+      source_notes.border.lr.color = "white",
+      table.border.bottom.color = "transparent"
+      # source_notes.border.lr.width = px(0),
     ) %>%
     tab_style(
           style = "padding-left:40px",
@@ -798,7 +806,7 @@ gov_facilities %>%
 
 # Socially Vulnerable Neighborhoods
 
-The CDC created a Social Vulnerability Index to rank communities that are more vulnerable to the impacts of disasters (like flooding). It uses social, economic, and environmental factors to assess how well specific neighborhoods can respond to and recover from crises. Higher % Ranks (ie redder areas) indicate neighborhoods that are more vulnerable to disasters and may need more support. 
+The CDC created a [Social Vulnerability Index](https://www.atsdr.cdc.gov/place-health/php/svi/index.html) to rank communities that are more vulnerable to the impacts of disasters (like flooding). It uses social, economic, and environmental factors to assess how well specific neighborhoods can respond to and recover from crises. Higher % Ranks (ie redder areas) indicate neighborhoods that are more vulnerable to disasters and may need more support. 
 
 ```{r}
 #| label: svi
@@ -825,7 +833,7 @@ dc_svi_map = dc_svi_filtered %>%
           at = seq(0,1, 0.1))
 
 
-svi_map = aff_area_map + dc_svi_map
+svi_map =  dc_svi_map + aff_area_map
 
 svi_map %>%  add_map_customization(c("Flooding Zone", "Social Vulnerability % Rank")) 
 
@@ -833,6 +841,9 @@ svi_map %>%  add_map_customization(c("Flooding Zone", "Social Vulnerability % Ra
 
 
 # All Affected Services 
+
+::: {.panel-tabset .nav-pills}
+## Map
 
 Only check one or two layers at a time
 
@@ -902,4 +913,29 @@ combined_map %>%
     ) 
 
 ```
+
+## Table
+
+```{r}
+#| label: table of all data
+filtered_data_for_table = filtered_point_data %>% 
+select(Name = name, Type = type, Subtype = subtype, Address = address,
+     `Web URL` = web_url, Phone = phone, Grades = grades, facility_type = facilility_type)
+
+filtered_data_for_table %>% 
+  create_gt_table() %>% 
+  tab_source_note(
+    filtered_data_for_table %>%
+      download_this(
+        output_name = "affected_gov_services_floodzone",
+        output_extension = ".csv", # CSV output
+        button_label = "Download CSV",
+        button_type = "default",
+        csv2 = FALSE,
+      )
+  )
+```
+
+:::
+
 
